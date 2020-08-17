@@ -1,0 +1,52 @@
+#!/bin/sh
+
+# gcp-runas <name> <command...>
+
+set -eu
+
+die() {
+  echo "$@" >&2
+  exit 1
+}
+
+keyfile=""
+
+onExit() {
+  if [ -n "${keyfile:-}" ]; then
+    keyId=$(jq -r .private_key_id "$keyfile")
+#    gcloud auth revoke --quiet "$accountEmail"
+#    gcloud config set --quiet account "$currentAccount"
+    gcloud iam service-accounts keys delete --quiet "$keyId" --iam-account="$accountEmail"
+
+    rm -f $keyfile
+    keyfile=""
+
+  fi
+}
+
+trap onExit EXIT
+
+umask 0077  # so files are created user-accessible only
+keyfile=$(mktemp)
+
+currentAccount=$(gcloud config get-value account)
+
+accountEmail=$(gcloud iam service-accounts list | awk '$1 == "'${1}'" { print $2 }')
+shift
+
+[ -n "$accountEmail" ] || die "failed to find service account email address"
+
+gcloud iam service-accounts keys create --quiet "$keyfile" --iam-account="$accountEmail"
+#gcloud auth activate-service-account --quiet "$accountEmail" --key-file="$keyfile"
+
+export GOOGLE_APPLICATION_CREDENTIALS=${keyfile}
+
+if [ $# -ge 1 ]; then
+  eval "$@"
+else
+  $SHELL -i
+fi
+
+export GOOGLE_APPLICATION_CREDENTIALS=""
+
+onExit  ## why is this needed if we're trapping?
